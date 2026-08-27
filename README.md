@@ -17,11 +17,10 @@ A *functional* grasp is one that not only immobilises an object but acquires it 
 
 Reinforcement learning solves the task reliably when the policy is granted privileged access to simulator state — exact object pose, per-link contact forces, and object velocities. None of these quantities are observable on hardware, so such a policy is not deployable. The pipeline therefore follows a **privileged-teacher / visuomotor-student distillation** scheme:
 
-```
-  PPO teacher  ──rollout──>  zarr dataset  ──train──>  DP3 student  ──eval──>  success rate
- (privileged state)         (point cloud +            (point cloud +          (fixed Sobol
-                             proprioception)           proprioception)         pose set)
-```
+<p align="center"><img src="docs/img/framework.png" width="94%" alt="Framework: privileged PPO teacher on top, vision-based DP3 student below, with the contact-gated torque branch expanded"></p>
+
+**Top:** the privileged teacher, trained with PPO on the 71-dimensional simulator state — drill pose, velocity and up-axis, hand–drill distances, hand-base and goal orientation, joint positions, and per-link contact forces — none of which a real robot can measure. **Bottom:** the student observes only what it can: a point cloud and joint proprioception, each embedded by its own branch. The torque branch passes through the contact gate, and the privileged contact labels (dashed red) reach the loss only — never the network input.
+
 
 1. A privileged teacher is trained with PPO (rl_games) on full simulator state.
 2. The teacher is rolled out and only hardware-observable quantities are recorded — a depth-camera point cloud and joint proprioception — paired with the joint targets the teacher executed.
@@ -204,6 +203,11 @@ python tools/build_robot_pointcloud.py     # -> assets/inspire_tac/robot_canonic
 ---
 
 ## Scripts
+
+Six stages produce every number in this repository. Each box names the script that performs it and the artefact it writes:
+
+<p align="center"><img src="docs/img/pipeline.png" width="88%" alt="Reproduction pipeline: six stages, the script for each, and the file it writes"></p>
+
 
 ### Training the RL teachers (privileged state, PPO via rl_games)
 
