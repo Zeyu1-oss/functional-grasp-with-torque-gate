@@ -1,0 +1,36 @@
+name: inspire_drill_grasp_maskch
+
+task_name: inspire_drill_grasp_maskch
+
+# 纯抓取 + 把手 mask 作为点云第 4 通道:collect_dp3_data.py --stage1_only --save_mask ...
+# 点云 (1184, 4) = [xyz | is_handle],cam1 512 | cam2 512 | robot 160。
+#   - point_cloud (1184,3) 和 pc_mask (1184,) 在 zarr 里是两个数组;dataset.mask_channel=True
+#     时 _sample_to_data 把 pc_mask 拼成第 4 通道 -> (1184,4)。
+#   - 编码器读 shape_meta 通道数=4 -> 用 PointNetEncoderXYZRGB(in_channels=4);
+#     需在训练命令里加 policy.use_pc_color=true(保留全部通道,不切到 xyz)。
+# agent_pos 用 13 维关节位置(force 已证明有害,不用)。
+shape_meta: &shape_meta
+  obs:
+    point_cloud:
+      shape: [1184, 4]   # [xyz | is_handle],mask 当第 4 通道
+      type: point_cloud
+    agent_pos:
+      shape: [13]
+      type: low_dim
+  action:
+    shape: [13]
+
+env_runner:
+  _target_: diffusion_policy_3d.env_runner.dummy_runner.DummyRunner
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.inspire_drill_dataset.InspireDrillDataset
+  zarr_path: ???
+  agent_pos_dim: 13
+  mask_channel: true   # 把 pc_mask 拼成点云第 4 通道
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null

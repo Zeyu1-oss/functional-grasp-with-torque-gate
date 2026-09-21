@@ -1,0 +1,234 @@
+defaults:
+  - task: adroit_hammer
+
+name: train_simple_dp3
+
+
+task_name: ${task.name}
+shape_meta: ${task.shape_meta}
+exp_name: "debug"
+
+horizon: 16
+n_obs_steps: 2
+n_action_steps: 8
+n_latency_steps: 0
+dataset_obs_steps: ${n_obs_steps}
+keypoint_visible_rate: 1.0
+obs_as_global_cond: True
+
+policy:
+  _target_: diffusion_policy_3d.policy.simple_dp3.SimpleDP3
+  use_point_crop: true
+  condition_type: film
+  use_down_condition: true
+  use_mid_condition: true
+  use_up_condition: true
+  
+  diffusion_step_embed_dim: 128
+  down_dims:
+  - 128
+  - 256
+  - 384
+  crop_shape:
+  - 80
+  - 80
+  encoder_output_dim: 64
+  horizon: ${horizon}
+  kernel_size: 5
+  n_action_steps: ${n_action_steps}
+  n_groups: 8
+  n_obs_steps: ${n_obs_steps}
+
+  noise_scheduler:
+    _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
+    num_train_timesteps: 100
+    beta_start: 0.0001
+    beta_end: 0.02
+    beta_schedule: squaredcos_cap_v2
+    clip_sample: True
+    set_alpha_to_one: True
+    steps_offset: 0
+    prediction_type: sample
+
+
+  num_inference_steps: 10
+  obs_as_global_cond: true
+  shape_meta: ${shape_meta}
+
+
+
+  # whether to use point cloud's color
+  use_pc_color: false
+  pointnet_type: "pointnet"
+
+
+  pointcloud_encoder_cfg:
+    in_channels: 3
+    out_channels: ${policy.encoder_output_dim}
+    use_layernorm: true
+    final_norm: layernorm # layernorm, none
+    normal_channel: false
+
+  # Narrow what the ENCODER consumes from agent_pos while the batch keeps its full width.
+  # null = encoder sees everything (default). Set to 13 for the "torque as objective only"
+  # ablation: the trajectory still regresses the 13 torque dims (the target is sliced from the
+  # untouched 26-dim batch) but the policy never observes them. Shrinking agent_pos itself
+  # cannot express this -- it would remove the target too. Disables state_split when active,
+  # since there is no force block left in the input to split off.
+  state_obs_dim: null
+
+  # Clamp normalized agent_pos into [-1,1]. Belongs together with the dataset's
+  # task.dataset.torque_start (percentile torque scaling): that scaling fixes the torque
+  # channel's scale but pushes ~2% of frames -- the effort-limit saturation frames -- out of
+  # range, up to +-8.9, where MSE (squared) would give those 2% about 11% of the torque
+  # gradient. A no-op under plain min/max normalization, so leaving it on costs nothing;
+  # leaving it OFF while torque_start is set is the mistake, and SimpleDP3 prints a red
+  # warning for the first 50 batches if it sees out-of-range values.
+  clamp_agent_pos: false
+
+  state_split:
+    enabled: true
+    pos_dim: 13
+    pos_mlp_size: [64, 64]
+    force_mlp_size: [64, 64]
+    force_dropout: 0
+
+  # Contact-gated torque branch. OFF by default: with enabled=false everything below is inert
+  # and the policy is byte-identical to before. Turning it on requires a zarr collected with
+  # --save_contact and task.dataset.load_contact=true.
+  #   arm_joints: leading torque dims that belong to the arm. They are DROPPED from the force
+  #     branch entirely (std 10x the fingers', gravity-dominated); only the remaining finger
+  #     dims are gated and encoded.
+  #   beta: weight of the BCE. Raise it if gate/separation stays near 0.
+  #   groups: per-gate contact-sensor columns. Column order comes from
+  #     GraspDrillEnv._get_contact_forces_obs, NOT from the order the sensors are declared in.
+  #     Column 6 (thumb_proximal_base) never fires and 12 (hand_base) has no joint to gate.
+  contact_gate:
+    enabled: false
+    # per_finger: 6 gates, one per finger joint; only the finger torques are encoded and the
+    #             arm's 7 dims are dropped from the force branch. Gate reads the finger block
+    #             of [q, tau] (12d).
+    # global    : 1 gate over ALL 13 torque dims, arm included -- the mechanism of
+    #             arXiv:2604.01414. Its label is `global_group` ("is the hand touching at all"),
+    #             and the gate reads the 13-d TORQUE ALONE: arm torque genuinely carries contact
+    #             through J^T F_ext, whereas joint angles only correlate with task phase and
+    #             would let the gate learn a shortcut that fails on a closed-but-empty hand.
+    scope: per_finger
+    # gate_position: WHAT the gate multiplies.
+    #   input   (default, the original behaviour) phi multiplies the raw torque and tau_free is a
+    #           learnable stand-in in TORQUE space; the encoder only ever sees the gated signal.
+    #   feature (arXiv:2604.01414 Eq.1) the encoder always sees the REAL torque and phi multiplies
+    #           its OUTPUT:  f_gated = phi*f_torque + (1-phi)*f*,  f* learnable in FEATURE space.
+    #           A 64-d feature cannot be split across 6 finger gates, so this is necessarily ONE
+    #           global gate; the BCE then uses the single global_group label, whatever `scope` says.
+    #           `scope` still selects the torque block reaching force_mlp (per_finger = finger 6).
+    gate_position: input
+    arm_joints: 7
+    hidden: 64
+    beta: 0.1
+    threshold: 0.01
+    # soft_label: grade the BCE target by contact FORCE instead of thresholding it to 0/1.
+    #   target = clip(log1p(|F|) / log1p(c_ref), 0, 1)
+    # The forward pass is continuous either way (phi is a sigmoid); the hard label is what
+    # drives phi to saturate, so this is the switch that actually makes the gate graded.
+    # In-contact force spans more than a decade (p10 2.6-8.3 N, p50 14-29, p90 36-67, max 86.6
+    # on norobot.zarr) and the hard label collapses all of it onto 1. log rather than linear:
+    # a linear map would put a light touch (~3 N) at 0.05, indistinguishable from no contact.
+    # c_ref = per-group p90 of the in-contact magnitude, SAME ORDER as `groups` below
+    # (index, middle, pinky, ring, thumb-yaw, thumb-pitch). soft_c_ref_global is the single
+    # reference used when scope=global.
+    # NOTE: BCE against a soft target floors at the target entropy, so `contact_loss` is not
+    # comparable against a hard-label run -- compare gate/separation and deployed success.
+    soft_label: false
+    soft_c_ref: [59.7, 45.5, 36.5, 39.7, 67.1, 67.1]
+    soft_c_ref_global: [73.0]
+    global_group:
+      - [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]   # every live sensor (6 never fires)
+    groups:
+      - [8, 0]      # index  : R_index_proximal  + R_index_intermediate
+      - [9, 2]      # middle : R_middle_proximal + R_middle_intermediate
+      - [11, 4]     # pinky  : R_pinky_proximal  + R_pinky_intermediate
+      - [10, 3]     # ring   : R_ring_proximal   + R_ring_intermediate
+      - [7, 5, 1]   # thumb yaw   : R_thumb_proximal + _intermediate + _distal
+      - [7, 5, 1]   # thumb pitch : same links, shares the label
+
+ema:
+  _target_: diffusion_policy_3d.model.diffusion.ema_model.EMAModel
+  update_after_step: 0
+  inv_gamma: 1.0
+  power: 0.75
+  min_value: 0.0
+  max_value: 0.9999
+
+dataloader:
+  batch_size: 128
+  num_workers: 8
+  shuffle: True
+  pin_memory: True
+  persistent_workers: True
+
+val_dataloader:
+  batch_size: 128
+  num_workers: 8
+  shuffle: False
+  pin_memory: True
+  persistent_workers: False
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 2.0e-4
+  betas: [0.95, 0.999]
+  eps: 1.0e-8
+  weight_decay: 1.0e-6
+
+training:
+  device: "cuda:0"
+  seed: 42
+  debug: False
+  resume: True
+  lr_scheduler: cosine
+  lr_warmup_steps: 500
+  num_epochs: 100
+  gradient_accumulate_every: 1   
+  use_ema: True
+  rollout_every: 200
+  checkpoint_every: 1     
+  val_every: 10
+  sample_every: 5
+  max_train_steps: null
+  max_val_steps: null
+  tqdm_interval_sec: 1.0
+
+logging:
+  group: ${exp_name}
+  id: null
+  mode: online
+  name: ${training.seed}
+  project: dp3
+  resume: true
+  tags:
+  - dp3
+
+
+checkpoint:
+  save_ckpt: True # if True, save checkpoint every checkpoint_every
+  topk:
+    monitor_key: val_loss
+    mode: min
+    k: 1
+    format_str: 'epoch={epoch:04d}-val_loss={val_loss:.4f}.ckpt'
+  save_last_ckpt: True # this only saves when save_ckpt is True
+  save_last_snapshot: False
+
+multi_run:
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+
+hydra:
+  job:
+    override_dirname: ${name}
+  run:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  sweep:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    subdir: ${hydra.job.num}

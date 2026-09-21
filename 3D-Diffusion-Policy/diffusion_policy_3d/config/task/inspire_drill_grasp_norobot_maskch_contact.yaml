@@ -1,0 +1,53 @@
+name: inspire_drill_grasp_norobot_maskch_contact
+
+task_name: inspire_drill_grasp_norobot_maskch_contact
+
+# stage1-only grasp, cam1 alone, no robot FK segment, handle mask as a 4th point-cloud channel,
+# joint-torque state, and the per-link hand contact forces kept as a training-time label:
+#   collect_dp3_data.py --stage1_only --disable_cam2 --no_robot \
+#                       --force_state --save_contact --save_mask ...
+#
+# 与 inspire_drill_grasp_norobot_contact 的唯一区别就是点云多了第 4 通道(is_handle);
+# 点数、相机构成、state、contact 全部一致,所以两者是干净的单变量对照。
+#
+# 点云 (2048, 4) = [xyz | is_handle],cam1 alone。zarr 里 point_cloud (T,2048,3) 和
+#   pc_mask (T,2048) 是两个数组,dataset.mask_channel=true 时 _sample_to_data 拼成第 4 通道。
+#   mask 已经过 limits normalizer:标签 0/1 经 min=0/max=1 映射成 -1/+1,不是 0/1。
+# agent_pos (26) = [joint pos(13) | joint torque(13)]。
+# data/contact (13) = 每个手部 link 与电钻的接触力幅值,特权信息,只监督 contact gate,
+#   不进网络输入,所以不在 shape_meta 里,deploy 也不需要。
+#
+# 训练命令里有两个不能漏的开关(train_..._norobot_maskgate_pnorm.sh 已经带上):
+#   policy.use_pc_color=true
+#     否则 simple_dp3 在 compute_loss/predict_action 里都会 point_cloud[..., :3],
+#     mask 通道被静默丢掉 —— 采了等于没采。
+#   +policy.pointcloud_encoder_cfg.slim_encoder=true
+#     否则 4 通道会被路由到 PointNetEncoderXYZRGB([64,128,256,512], 4 层),encoder 容量
+#     跟着变,mask 的消融就混进了一个容量变量。slim 走 PointNetEncoderXYZ([64,128,256]),
+#     只有第一层 Linear 从 3->4(+64 参数),与 3 通道基线容量一致。
+shape_meta: &shape_meta
+  obs:
+    point_cloud:
+      shape: [2048, 4]   # [xyz | is_handle],cam1 alone,无 robot/plate/ground 段
+      type: point_cloud
+    agent_pos:
+      shape: [26]        # joint pos(13) + joint torque(13)
+      type: low_dim
+  action:
+    shape: [13]
+
+env_runner:
+  _target_: diffusion_policy_3d.env_runner.dummy_runner.DummyRunner
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.inspire_drill_dataset.InspireDrillDataset
+  zarr_path: ???
+  agent_pos_dim: 26
+  mask_channel: true     # 读 data/pc_mask -> 点云第 4 通道
+  load_contact: true     # 读 data/contact -> batch['contact'],供 contact gate 的 BCE 用
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null

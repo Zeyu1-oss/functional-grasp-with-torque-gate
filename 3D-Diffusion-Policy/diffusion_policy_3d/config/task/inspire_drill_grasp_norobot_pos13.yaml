@@ -1,0 +1,44 @@
+name: inspire_drill_grasp_norobot_pos13
+
+task_name: inspire_drill_grasp_norobot_pos13
+
+# Plain DP3 baseline on the camera-only grasp data: point cloud + joint POSITIONS, nothing else.
+#   collect_dp3_data.py --stage1_only --disable_cam2 --no_robot --force_state ...
+# 点云 (2048, 3) = cam1 alone。agent_pos (13) = 关节位置。
+#
+# The zarr still stores 26 dims ([pos13 | torque13], it was collected with --force_state), and
+# dataset.agent_pos_dim=13 slices the torque half off at load time. Declaring 13 here rather than
+# using policy.state_obs_dim matters at DEPLOY time: deploy_dp3_sim.py reads this shape out of
+# the checkpoint to decide whether to assemble a 26-dim agent_pos, i.e. whether it has to read
+# applied_torque at all. A baseline that never looks at torque should not force the deployment to
+# provide it.
+#
+# The cells that DO use torque cannot do this -- inspire_drill_grasp_norobot_contact.yaml keeps
+# agent_pos at 26 because the auxiliary target is sliced from that same tensor, so narrowing it
+# would delete the target. Those cells narrow the encoder's view with policy.state_obs_dim
+# instead, leaving the batch intact.
+shape_meta: &shape_meta
+  obs:
+    point_cloud:
+      shape: [2048, 3]   # cam1 alone, no robot segment
+      type: point_cloud
+    agent_pos:
+      shape: [13]        # joint positions only
+      type: low_dim
+  action:
+    shape: [13]
+
+env_runner:
+  _target_: diffusion_policy_3d.env_runner.dummy_runner.DummyRunner
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.inspire_drill_dataset.InspireDrillDataset
+  zarr_path: ???
+  agent_pos_dim: 13      # take state[..., :13] -- drop the torque half at load time
+  load_contact: false
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null

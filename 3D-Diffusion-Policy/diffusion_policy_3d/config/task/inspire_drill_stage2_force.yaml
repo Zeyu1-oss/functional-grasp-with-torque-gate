@@ -1,0 +1,33 @@
+name: inspire_drill_stage2_force
+
+task_name: inspire_drill_stage2_force
+
+# stage2-only alignment (drill starts already grasped, teacher aligns it to the plate), cam2(wrist)+cam3(plate)
+# camera segment, robot FK points, joint-torque state:
+#   collect_dp3_data.py --stage2_only --force_state ...
+# 点云 (1184, 3) = [xyz] -- no mask/rgb channel this variant. cam2 512 | cam3 512 | robot 160 (no plate/drill/ground segment).
+# agent_pos (26) = [joint pos(13) | joint torque(13)] (perception/student_obs.py build_agent_pos, with_force=True).
+shape_meta: &shape_meta
+  obs:
+    point_cloud:
+      shape: [1184, 3]   # cam2 512 + cam3 512 + robot 160, xyz only
+      type: point_cloud
+    agent_pos:
+      shape: [26]        # joint pos(13) + joint torque(13)
+      type: low_dim
+  action:
+    shape: [13]
+
+env_runner:
+  _target_: diffusion_policy_3d.env_runner.dummy_runner.DummyRunner
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.inspire_drill_dataset.InspireDrillDataset
+  zarr_path: ???
+  agent_pos_dim: 26
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null

@@ -1,0 +1,37 @@
+name: inspire_drill_chained
+
+task_name: inspire_drill_chained
+
+# 串联(抓取+对齐)完整任务:collect_dp3_data.py --chained --force_state --ground_points 0
+# 点云段序 = cam1 512 | cam2 512 | plate 512 | robot 160 = 1696(当前默认,地面段禁用排查用)。
+# 布局固定,不自动适配:训练脚本会校验 zarr 点数 == EXPECTED_PC,不符直接报错。
+# 历史布局:+ground 96(默认地面段)=1792;+drill(mesh定点,oracle)512(perception/drill_pointcloud.py,
+#   补深度相机在近距离接触抓取时的遮挡/自遮挡缺口)=2304。
+# 换布局需同时改这里、training shell 脚本的 EXPECTED_PC、以及 collect/deploy 的
+# --ground_points/--drill_mesh_points,三处不一致会在 deploy 时报维度不符。
+# state:zarr 存了 26 维 [关节位置13 | 接触力13],训练只取前 13 维关节位置(force 暂不用),
+#       通过 dataset.agent_pos_dim=13 切片,无需重采数据。
+shape_meta: &shape_meta
+  obs:
+    point_cloud:
+      shape: [1696, 3]   # cam1 512|cam2 512|plate 512|robot 160(无 ground、无 drill 段)
+      type: point_cloud
+    agent_pos:
+      shape: [13]   # 仅 13 关节位置(force 暂不用);要用回 force 改 26 并联动 agent_pos_dim
+      type: low_dim
+  action:
+    shape: [13]
+
+env_runner:
+  _target_: diffusion_policy_3d.env_runner.dummy_runner.DummyRunner
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.inspire_drill_dataset.InspireDrillDataset
+  zarr_path: ???
+  agent_pos_dim: 13   # 只取 state 前 13 维(关节位置);要用回接触力设 26 并把上面 shape 改 [26]
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null

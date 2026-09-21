@@ -1,0 +1,36 @@
+name: inspire_drill_grasp_norobot_contact
+
+task_name: inspire_drill_grasp_norobot_contact
+
+# stage1-only grasp, camera segment ONLY (no robot FK segment), joint-torque state, and the
+# per-link hand contact forces kept as a training-time label:
+#   collect_dp3_data.py --stage1_only --disable_cam2 --no_robot --force_state --save_contact ...
+# 点云 (2048, 3) = cam1 alone, xyz only. --no_robot 去掉了 robot FK 段。
+# agent_pos (26) = [joint pos(13) | joint torque(13)] (perception/student_obs.py build_agent_pos).
+# data/contact (13) = 每个手部 link 与电钻的接触力幅值。它是特权信息:只用来监督 policy 的
+#   contact gate(BCE),不进网络输入,所以不在 shape_meta 里,deploy 也不需要它。
+shape_meta: &shape_meta
+  obs:
+    point_cloud:
+      shape: [2048, 3]   # cam1 alone, no robot segment
+      type: point_cloud
+    agent_pos:
+      shape: [26]        # joint pos(13) + joint torque(13)
+      type: low_dim
+  action:
+    shape: [13]
+
+env_runner:
+  _target_: diffusion_policy_3d.env_runner.dummy_runner.DummyRunner
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.inspire_drill_dataset.InspireDrillDataset
+  zarr_path: ???
+  agent_pos_dim: 26
+  load_contact: true     # 读 data/contact -> batch['contact'],供 contact gate 的 BCE 用
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null

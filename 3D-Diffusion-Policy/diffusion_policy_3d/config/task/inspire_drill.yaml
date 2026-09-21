@@ -1,0 +1,28 @@
+name: inspire_drill
+
+task_name: inspire_drill
+
+shape_meta: &shape_meta
+  obs:
+    point_cloud:
+      shape: [1280, 3]   # camera 1024(两相机各512) + robot 160 + ground 96(旧 3810pc 数据集: [3810, 3])
+      type: point_cloud
+    agent_pos:
+      shape: [13]   # 13=仅关节位置 | 26=[pos13|force13];须与 dataset.agent_pos_dim 联动
+      type: low_dim
+  action:
+    shape: [13]
+
+env_runner:
+  _target_: diffusion_policy_3d.env_runner.dummy_runner.DummyRunner
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.inspire_drill_dataset.InspireDrillDataset
+  zarr_path: ???
+  agent_pos_dim: 13   # 从 26 维 state 只取前 13 维位置;用回 force 时设 26(或 null=全取)并同步上面 shape
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02   
+  max_train_episodes: null  

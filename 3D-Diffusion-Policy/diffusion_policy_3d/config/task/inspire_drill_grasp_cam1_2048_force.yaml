@@ -1,0 +1,32 @@
+name: inspire_drill_grasp_cam1_2048_force
+
+task_name: inspire_drill_grasp_cam1_2048_force
+
+# stage1-only grasp, cam1-only camera segment (cam2/wrist cam disabled), robot FK points, joint-torque state:
+#   collect_dp3_data.py --stage1_only --disable_cam2 --pc_num_points 2048 --robot_pc_points 512 --force_state ...
+# 点云 (2560, 3) = [xyz] -- no mask/rgb channel this variant. cam1 2048 | robot 512.
+# agent_pos (26) = [joint pos(13) | joint torque(13)] (perception/student_obs.py build_agent_pos, with_force=True).
+shape_meta: &shape_meta
+  obs:
+    point_cloud:
+      shape: [2560, 3]   # cam1 2048 + robot 512, xyz only
+      type: point_cloud
+    agent_pos:
+      shape: [26]        # joint pos(13) + joint torque(13)
+      type: low_dim
+  action:
+    shape: [13]
+
+env_runner:
+  _target_: diffusion_policy_3d.env_runner.dummy_runner.DummyRunner
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.inspire_drill_dataset.InspireDrillDataset
+  zarr_path: ???
+  agent_pos_dim: 26
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null

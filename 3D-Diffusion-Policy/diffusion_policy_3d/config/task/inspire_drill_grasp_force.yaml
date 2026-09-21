@@ -1,0 +1,33 @@
+name: inspire_drill_grasp_force
+
+task_name: inspire_drill_grasp_force
+
+# 纯抓取任务 + 接触力观测(state split):collect_dp3_data.py --stage1_only --force_state --pc_mode robot --ground_points 0
+# 点云 [1184,3] = cam1 512 | cam2 512 | robot 160(与 inspire_drill_grasp 相同布局)。
+# 与 inspire_drill_grasp.yaml 的唯一区别:agent_pos 用满 26 维 [关节位置13 | 接触力13],
+# 从而触发 simple_dp3.yaml 里的 state_split(pos13 走一个 MLP、force13 走另一个带 dropout 的
+# MLP,再和点云特征 concat)。数据无需重采——1184s1.zarr 的 state 本来就存了 26 维。
+shape_meta: &shape_meta
+  obs:
+    point_cloud:
+      shape: [1184, 3]   # cam1 512|cam2 512|robot 160(无 plate/drill/ground 段)
+      type: point_cloud
+    agent_pos:
+      shape: [26]   # 26=[关节位置13 | 接触力13];配 state_split 拆成 pos/force 两支
+      type: low_dim
+  action:
+    shape: [13]
+
+env_runner:
+  _target_: diffusion_policy_3d.env_runner.dummy_runner.DummyRunner
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.inspire_drill_dataset.InspireDrillDataset
+  zarr_path: ???
+  agent_pos_dim: 26   # 取满 26 维(位置13+力13);须与上面 agent_pos.shape 一致
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null

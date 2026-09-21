@@ -1,0 +1,34 @@
+name: inspire_drill_grasp
+
+task_name: inspire_drill_grasp
+
+# 纯抓取任务(无 plate/对齐段):collect_dp3_data.py --stage1_only --force_state --pc_mode robot --ground_points 0
+# 点云段序 = cam1 512 | cam2 512 | robot 160 = 1184(cam3/plate 不启动,无 plate/drill/ground 段)。
+# 布局固定,不自动适配:训练脚本会校验 zarr 点数 == EXPECTED_PC(=1184),不符直接报错。
+# 与串联 1696(含 plate 段)点数不同,不能混训。
+# state:zarr 存了 26 维 [关节位置13 | 接触力13],训练只取前 13 维关节位置(force 暂不用),
+#       通过 dataset.agent_pos_dim=13 切片;要用回接触力设 26 并把下面 agent_pos.shape 改 [26]。
+shape_meta: &shape_meta
+  obs:
+    point_cloud:
+      shape: [1184, 3]   # cam1 512|cam2 512|robot 160(无 plate、无 drill、无 ground 段)
+      type: point_cloud
+    agent_pos:
+      shape: [13]   # 仅 13 关节位置(force 暂不用);要用回 force 改 26 并联动 agent_pos_dim
+      type: low_dim
+  action:
+    shape: [13]
+
+env_runner:
+  _target_: diffusion_policy_3d.env_runner.dummy_runner.DummyRunner
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.inspire_drill_dataset.InspireDrillDataset
+  zarr_path: ???
+  agent_pos_dim: 13   # 只取 state 前 13 维(关节位置);要用回接触力设 26 并把上面 shape 改 [26]
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null

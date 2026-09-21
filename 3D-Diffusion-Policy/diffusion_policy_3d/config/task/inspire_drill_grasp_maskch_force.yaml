@@ -1,0 +1,49 @@
+name: inspire_drill_grasp_maskch_force
+
+task_name: inspire_drill_grasp_maskch_force
+
+# 纯抓取 + 把手 mask 作为点云第 4 通道 + 关节力矩 state。
+#   collect_dp3_data.py --stage1_only --disable_cam2 --pc_num_points 2048 --robot_pc_points 512 \
+#                       --force_state --save_mask --mask_threshold 0.005 ...
+#
+# 点云 (2560, 4) = [xyz | is_handle],cam1 2048 | robot 512(cam2 禁用,无 plate/drill/ground 段)。
+#   - point_cloud (2560,3) 和 pc_mask (2560,) 在 zarr 里是两个数组;dataset.mask_channel=True
+#     时 _sample_to_data 把 pc_mask 拼成第 4 通道 -> (2560,4)。
+#   - 训练命令必须加 policy.use_pc_color=true,否则 simple_dp3 会在 predict_action/compute_loss 里
+#     把点云切回 [..., :3],mask 通道直接被丢掉(等于白采)。
+#   - 同时必须加 +policy.pointcloud_encoder_cfg.slim_encoder=true,否则 4 通道会被路由到
+#     PointNetEncoderXYZRGB([64,128,256,512],4 层),encoder 容量跟着变,mask 的消融就不干净了。
+#     slim_encoder=true 走 PointNetEncoderXYZ([64,128,256]),只有第一层 Linear 从 3->4,
+#     与 inspire_drill_grasp_cam1_2048_force 基线的容量一致(+64 参数)。
+#
+# agent_pos (26) = [关节位置13 | 关节力矩13]。26 维才能让 simple_dp3.yaml 的 state_split 生效
+#   (force_dim = 26 - pos_dim13 = 13 > 0);若写成 13,DP3Encoder 只打一行红字警告然后退回单
+#   state_mlp,力矩会被静默丢掉。
+#
+# 与之配套的基线(消融对照):
+#   inspire_drill_grasp_cam1_2048_force  -> 同数据、无 mask、3 通道、同 slim encoder
+shape_meta: &shape_meta
+  obs:
+    point_cloud:
+      shape: [2560, 4]   # [xyz | is_handle],mask 当第 4 通道
+      type: point_cloud
+    agent_pos:
+      shape: [26]        # joint pos(13) + joint torque(13)
+      type: low_dim
+  action:
+    shape: [13]
+
+env_runner:
+  _target_: diffusion_policy_3d.env_runner.dummy_runner.DummyRunner
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.inspire_drill_dataset.InspireDrillDataset
+  zarr_path: ???
+  agent_pos_dim: 26
+  mask_channel: true   # 把 pc_mask 拼成点云第 4 通道
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null

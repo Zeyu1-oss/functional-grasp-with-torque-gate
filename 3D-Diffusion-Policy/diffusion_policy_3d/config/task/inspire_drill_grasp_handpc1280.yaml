@@ -1,0 +1,41 @@
+name: inspire_drill_grasp_handpc1280
+
+task_name: inspire_drill_grasp_handpc1280
+
+# stage1-only grasp, cam1-only camera segment (cam2 disabled), hand-only robot FK segment:
+#   collect_dp3_data.py --stage1_only --disable_cam2 --pc_num_points 2048 \
+#       --robot_pc_points 1280 --robot_pc_hand_only --robot_pc_per_link 50 --force_state ...
+#
+# 点云 (3328, 3) = [xyz] -- cam1 2048 | robot 1280。与 inspire_drill_grasp_cam1_2048_force
+# (2560 = cam1 2048 | robot 512) 的差别只在机器人段:
+#   - 只保留 Inspire 手的 18 个 R_* link,fr3 手臂 8 个 link 和 L_flange 全部排除
+#   - 手指每个 link 固定 50 点,R_hand_base_link 吃掉剩下的 430 点
+# 注意 1280 里只有 746 个不重复坐标:canonical npz 每个 link 的点数是离线采样时定死的
+# (只有 R_thumb_proximal 有 50+,五个 R_*_tip 各只有 6),超出上限的配额靠重复采样补齐,
+# 而 max-pool 对重复点是幂等的 —— 这 534 个重复点不影响特征,只占算力。
+#
+# agent_pos (26) = [joint pos(13) | joint torque(13)] (perception/student_obs.py, with_force=True)。
+shape_meta: &shape_meta
+  obs:
+    point_cloud:
+      shape: [3328, 3]   # cam1 2048 + robot(hand-only) 1280, xyz only
+      type: point_cloud
+    agent_pos:
+      shape: [26]        # joint pos(13) + joint torque(13)
+      type: low_dim
+  action:
+    shape: [13]
+
+env_runner:
+  _target_: diffusion_policy_3d.env_runner.dummy_runner.DummyRunner
+
+dataset:
+  _target_: diffusion_policy_3d.dataset.inspire_drill_dataset.InspireDrillDataset
+  zarr_path: ???
+  agent_pos_dim: 26
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  seed: 42
+  val_ratio: 0.02
+  max_train_episodes: null
