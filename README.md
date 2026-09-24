@@ -5,11 +5,20 @@ train the visuomotor **student** policy for the `inspire_drill` functional-grasp
 Inspire five-finger hand, distilled from a privileged PPO teacher, studying how applied joint torque should
 enter the student when it is only informative during hand–tool contact.
 
-This repo is not meant to be read standalone — it is **one step** of a larger pipeline. Training data comes
-from the Isaac Lab side ([**drill_sim2real**](https://github.com/Zeyu1-oss/drill_sim2real),
-`scripts/collect_dp3_data.py`), and checkpoints trained here are deployed and graded back there
-(`scripts/deploy_dp3_sim.py`). **Read that repo's README first** — it covers the full pipeline and this one
-only documents what changed on the DP3 side.
+This branch is not meant to be read standalone — it is **one step** of a larger pipeline, and the rest of it
+lives on the [**`main` branch**](https://github.com/Zeyu1-oss/functional-grasp-with-torque-gate/tree/main) of
+this same repository (the Isaac Lab side). Training data comes from there via
+`scripts/collect_dp3_data.py`, and checkpoints trained here are deployed and graded back there via
+`scripts/deploy_dp3_sim.py`. **Read the `main` branch's README first** — it covers the full pipeline, and
+this document only records what changed on the DP3 side.
+
+The two branches are checked out into separate directories, since they need separate Python environments:
+
+```
+<workspace>/
+├── functional-grasp-with-torque-gate/   the main branch — Isaac Lab (Python 3.11)
+└── 3D-Diffusion-Policy/                 this branch     — DP3 student training (Python 3.8)
+```
 
 ---
 
