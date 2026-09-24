@@ -5,18 +5,30 @@ train the visuomotor **student** policy for the `inspire_drill` functional-grasp
 Inspire five-finger hand, distilled from a privileged PPO teacher, studying how applied joint torque should
 enter the student when it is only informative during hand–tool contact.
 
-This repo is not meant to be read standalone. Task configs assume zarr data produced by
-`inspire_drill/scripts/collect_dp3_data.py`, and checkpoints trained here are deployed back into Isaac Lab via
-`inspire_drill/scripts/deploy_dp3_sim.py`. **See the `inspire_drill` repo's README for the full pipeline** —
-this document only covers what changed on the DP3 side.
+This repo is not meant to be read standalone — it is **one step** of a larger pipeline. Training data comes
+from the Isaac Lab side ([**drill_sim2real**](https://github.com/Zeyu1-oss/drill_sim2real),
+`scripts/collect_dp3_data.py`), and checkpoints trained here are deployed and graded back there
+(`scripts/deploy_dp3_sim.py`). **Read that repo's README first** — it covers the full pipeline and this one
+only documents what changed on the DP3 side.
 
 ---
 
 ## Installation
 
-Unchanged from upstream — follow [INSTALL.md](INSTALL.md) (or the original
+Dependencies are unchanged from upstream — follow [INSTALL.md](INSTALL.md) (or the original
 [3D Diffusion Policy README](https://github.com/YanjieZe/3D-Diffusion-Policy)). Developed against Python 3.8,
 torch 2.4.1 (cu124), diffusers 0.36, zarr 2.16, hydra 1.3.2.
+
+Two things the training scripts currently hardcode, and that you will have to adjust:
+
+- **The interpreter.** `scripts/train_policy_inspire_drill_grasp_norobot_eq1.sh` invokes
+  `/home/zeyu/anaconda3/envs/dp3/bin/python` and exports a `PYTHONPATH` rooted at `$HOME/3D-Diffusion-Policy`.
+  Either clone this repo to `~/3D-Diffusion-Policy` and edit that one interpreter path to point at your own
+  conda env, or edit both.
+- **Repository nesting.** The Python package lives one level down, in `3D-Diffusion-Policy/diffusion_policy_3d/`
+  (inherited from upstream's layout). Every source path below is relative to that inner directory; the
+  `scripts/` and `train.py` entry points are found from the repo root, which is where the scripts must be run
+  from. Checkpoints land in `3D-Diffusion-Policy/data/outputs/<run>/checkpoints/`.
 
 ---
 
@@ -60,43 +72,60 @@ default**: with every new config flag at its default, the policy is byte-identic
   `val_loss` (skipped-validation epochs); `train.py` gained `resume_from_checkpoint` /
   `_resume_ckpt_candidates` for resuming a crashed run.
 
-### Ablation grid (`scripts/train_policy_inspire_drill_grasp_norobot_*.sh`)
+### Training
 
-One script per cell. Every variant `exec`s the same base script (`_eq1.sh` / `_baseline.sh`) rather than
-copy-pasting it, so the data pipeline, validation, and checkpoint-naming logic can't silently drift between
-cells — only the ablated switch differs.
-
-| Script | obs | aux target | gate |
-|---|:--:|:--:|:--:|
-| `..._baseline.sh` | 13 | off | off |
-| `..._torqueobs.sh` | 26 | off | off |
-| `..._torqueobj.sh` | 13 | on | off |
-| `..._torqueboth.sh` | 26 | on | off |
-| `..._contactgate.sh` | 26 | on | on |
-| `..._eq1.sh` / `..._eq1_auxtorque.sh` | 26 | off / on | on (input-gated) |
-| `..._gatehard_pnorm.sh` / `..._gatesoft_pnorm.sh` | 26 | on | on (hard vs soft BCE label) |
-| `..._gateglobal.sh` / `..._gatefeat_pnorm.sh` | 26 | on | on (`scope=global` / `gate_position=feature`) |
-| `..._maskgate_pnorm.sh` | 26 | on | on (unsupervised gate ablation) |
-| `..._handonly.sh` / `..._handpc1280.sh` / `..._cam1_2048_force*.sh` | — | — | point-cloud composition variants (hand-only robot segment, denser robot cloud, camera-only) |
+One script produces the reported checkpoint — contact gate on, auxiliary torque objective on:
 
 ```bash
+# from the repo root (the script guards on it)
 bash scripts/train_policy_inspire_drill_grasp_norobot_eq1_auxtorque.sh <zarr_path> [seed] [gpu_id] [epochs] [gamma]
-AUX_BETA=0.05 bash scripts/train_policy_inspire_drill_grasp_norobot_eq1_auxtorque.sh   # override the aux loss weight
 ```
 
-Must be run from the repo root (the base scripts guard on it).
+`<zarr_path>` is the dataset `collect_dp3_data.py` wrote on the Isaac Lab side; it must have been collected
+with `--save_contact`, since the gate is supervised from it. Everything else defaults to the reported
+configuration — `SCOPE=global`, `GATE_POS=feature`, `AUX_BETA=0.1`, 1000 epochs — and each is an environment
+variable you can override:
 
-### Other scripts
+```bash
+AUX_BETA=0.05 bash scripts/train_policy_inspire_drill_grasp_norobot_eq1_auxtorque.sh <zarr_path>
+```
 
-- `scripts/viz.py` — zarr point-cloud viewer (matplotlib scatter, one or several frames). Needs only
-  `zarr`+`numpy`+`matplotlib`, no IsaacLab/torch, so it runs in a plain Python env. Replaces the deleted
-  `visualizer/` (Flask+Plotly, unused).
-- `scripts/test_ckpt_inference.py` — smoke-test: loads a checkpoint and runs one dummy forward pass, to check
-  it doesn't hang/crash before committing to a full eval.
+The run directory encodes the configuration, so ablation cells never collide:
+`data/outputs/..._eq1_global_feature_auxon_seed0/checkpoints/`. The reported result is epoch 180.
 
-### Removed
+The other `train_policy_inspire_drill_grasp_norobot_*.sh` scripts are the ablation cells (baseline, torque as
+observation or objective only, gate scope/position, hard vs. soft label, …). Each `exec`s the same base
+script with one switch flipped rather than copying it, so the data pipeline and validation logic cannot drift
+between cells — they are not separate code paths, and they are not part of the pipeline above.
 
-- `visualizer/` — the Flask+Plotly point-cloud web visualizer. Deleted; nothing in this project referenced it.
+### Visualizing data
+
+Before training on a freshly collected zarr, it is worth looking at it — a mis-specified collect flag shows
+up immediately as a missing or misplaced point-cloud segment.
+
+```bash
+python 3D-Diffusion-Policy/diffusion_policy_3d/env/inspire_drill/viz.py --data <zarr_path> --episode 0
+python 3D-Diffusion-Policy/diffusion_policy_3d/env/inspire_drill/viz.py --data <zarr_path> --only cam1 --frame -1
+```
+
+This is the tool actually used to inspect collected data: an interactive Plotly viewer that colours points by
+segment (`cam1`/`cam2`/`plate`/`robot`/`drill`/`ground`, each toggleable in the legend), or by the
+ground-truth handle mask when the zarr carries one. Without `--frame` it animates the whole episode; with it
+you get a single frame (negative indices count from the end). It also runs a wrist-camera extrinsics check,
+which catches a frozen-calibration bug present in some older datasets.
+
+> It writes its HTML output to a **hardcoded** `/home/zeyu/inspire_drill/data/` path — edit `html_path` near
+> the bottom of the file before running it elsewhere.
+
+`scripts/viz.py` is a lighter static alternative: matplotlib scatter → PNG, no Plotly or browser needed, and
+it takes an explicit `--out`. Between them they replace upstream's `visualizer/` (a Flask+Plotly web app),
+which is deleted here — nothing in this project referenced it.
+
+### Checking a checkpoint
+
+`scripts/test_ckpt_inference.py` loads a checkpoint and runs one dummy forward pass. Worth doing before
+handing a checkpoint to `deploy_dp3_sim.py`, which spins up Isaac Sim and takes considerably longer to tell
+you the same thing.
 
 ---
 
