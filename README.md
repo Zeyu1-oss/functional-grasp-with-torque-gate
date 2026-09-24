@@ -29,28 +29,30 @@ the deployed policy still consumes exactly what a real robot can measure.
 
 ## Installation
 
-This repo covers the full pipeline **up to student training** in a single **Isaac Lab**
+This branch (`main`) covers the full pipeline **up to student training** in a single **Isaac Lab**
 environment: both PPO teacher stages, interactive play/visualization, DP3 data collection, and —
-once a DP3 checkpoint exists — deployment. Training the DP3 student itself is **not** done here:
-it happens on the separate [`dp3` branch](https://github.com/Zeyu1-oss/functional-grasp-with-torque-gate/tree/dp3)
-of the forked 3D-Diffusion-Policy repo, in its own environment (its dependencies conflict with
-Isaac Sim's) — see [DP3 student training](#dp3-student-training-separate-branch-separate-env)
+once a DP3 checkpoint exists — deployment. Training the DP3 student itself is **not** done here.
+It lives on the [**`dp3` branch**](https://github.com/Zeyu1-oss/functional-grasp-with-torque-gate/tree/dp3)
+of this same repository, which needs its own Python environment because its dependencies conflict
+with Isaac Sim's — see [DP3 student training](#dp3-student-training-separate-branch-separate-env)
 below.
 
-The two repos are expected to sit side by side — the commands in Usage below assume this layout:
+So the two branches get checked out side by side, into separate directories. The commands in Usage
+below assume this layout:
 
 ```
 <workspace>/
-├── drill_sim2real/        this repo — Isaac Lab side (teachers, data collection, deploy)
-└── 3D-Diffusion-Policy/   the DP3 fork, `dp3` branch — student training only
+├── functional-grasp-with-torque-gate/   this branch (main) — Isaac Lab: teachers, collect, deploy
+└── 3D-Diffusion-Policy/                 the dp3 branch     — DP3 student training only
 ```
 
 1. Isaac Sim + Isaac Lab (developed against Python 3.11 / isaaclab 0.53.1): follow the official
    [Isaac Lab installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).
 
 ```bash
-# 2. This repo, plus the extra packages in that same env — covers everything here, deploy included
-git clone https://github.com/Zeyu1-oss/drill_sim2real.git && cd drill_sim2real
+# 2. This branch, plus the extra packages in that same env — covers everything here, deploy included
+git clone https://github.com/Zeyu1-oss/functional-grasp-with-torque-gate.git
+cd functional-grasp-with-torque-gate
 pip install rl_games==1.6.1 zarr numcodecs dill omegaconf trimesh
 ```
 
@@ -73,11 +75,11 @@ python tools/build_robot_pointcloud.py     # -> assets/inspire_tac/robot_canonic
 ### DP3 student training (separate branch, separate env)
 
 Only needed for step 4 of the pipeline below (training the diffusion-policy student) — nothing
-else in this repo depends on it. Clone the fork's `dp3` branch *next to* this repo and follow its
-own install:
+else on this branch depends on it. Check the `dp3` branch out into its *own* directory, next to
+this one, and follow its install:
 
 ```bash
-cd ..    # back to <workspace>, so the two repos end up siblings
+cd ..    # back to <workspace>, so the two checkouts end up siblings
 git clone -b dp3 https://github.com/Zeyu1-oss/functional-grasp-with-torque-gate.git 3D-Diffusion-Policy
 #    -> see that branch's README for what's added on top of upstream DP3, INSTALL.md for setup.
 #    Developed against: Python 3.8 · torch 2.4.1 (cu124) · diffusers 0.36 · zarr 2.16 · hydra 1.3.2
@@ -151,8 +153,8 @@ student is distilled from offline, through the contact-gated encoder and diffusi
 
 <p align="center"><img src="docs/img/pipeline.png" width="88%" alt="Teacher/student pipeline: PPO teacher rollout producing demonstrations (a), and the student's point-cloud/joint/torque encoders, contact gate, and diffusion head consuming them (b)"></p>
 
-PPO teacher training is two stages — grasp, then align. Everything below runs in this repo's
-Isaac Lab env, **except step 4**, which switches to the `dp3` branch's own env:
+PPO teacher training is two stages — grasp, then align. Everything below runs in this branch's
+Isaac Lab env, **except step 4**, which switches to the `dp3` checkout and its own env:
 
 ```bash
 # 1. Stage-1 teacher: grasp (PPO)
@@ -174,12 +176,12 @@ python scripts/collect_dp3_data.py --stage1_only --headless \
     --disable_cam2 --no_robot --force_state --save_contact \
     --stage1_checkpoint <path_to_checkpoint> --output data/norobot.zarr
 
-# 4. Train the DP3 student — switch to the sibling repo / its own env (see Installation above)
+# 4. Train the DP3 student — switch to the dp3 checkout / its own env (see Installation above)
 cd ../3D-Diffusion-Policy && bash scripts/train_policy_inspire_drill_grasp_norobot_eq1_auxtorque.sh \
-    ../drill_sim2real/data/norobot.zarr
-cd ../drill_sim2real
+    ../functional-grasp-with-torque-gate/data/norobot.zarr
+cd ../functional-grasp-with-torque-gate
 
-# 5. Back in this repo's env: draw a fixed, policy-independent evaluation pose set, then deploy
+# 5. Back in this env: draw a fixed, policy-independent evaluation pose set, then deploy
 #    the checkpoint step 4 produced and grade it
 python tools/make_sobol_init_poses.py -n 100 -o data/eval_sobol_100.npz   # -n is per drill variant -> 300
 python scripts/deploy_dp3_sim.py --stage1_only --headless --num_envs 70 \
