@@ -15,6 +15,15 @@ Only depends on torch; the collect/deploy env needs no mesh / URDF library.
 import numpy as np
 import torch
 
+# Link-name prefixes of the Inspire hand, for RobotPointCloudFK(link_filter=...).
+# The canonical npz holds 27 links: R_* (the hand, 837 pts), fr3_link0..7 (the arm, 256 pts) and
+# L_flange (the wrist adapter, 187 pts -- part of neither, which is why it must be named explicitly
+# rather than inferred). Defined here so collect and deploy import the SAME tuple: the filter does
+# not change the point count (--robot_pc_points still decides that), so a mismatch between the two
+# would leave the zarr shape identical and go completely unnoticed.
+HAND_LINK_PREFIXES = ("R_",)
+HAND_AND_FLANGE_PREFIXES = ("R_", "L_flange")
+
 
 def _quat_to_mat(quat_wxyz: torch.Tensor) -> torch.Tensor:
     """(..., 4) wxyz quaternion -> (..., 3, 3) rotation matrix. Matches IsaacLab body_quat_w."""
@@ -85,7 +94,8 @@ class RobotPointCloudFK:
     """Load canonical points + FK-transform each frame into a full robot point cloud."""
 
     def __init__(self, npz_path: str, body_names, device, verbose: bool = True,
-                 max_points: int = None):
+                 max_points: int = None, link_filter=None,
+                 per_link_points: int = None, fill_link: str = "R_hand_base_link"):
         """
         Args:
             npz_path:   .npz produced by tools/build_robot_pointcloud.py
@@ -95,6 +105,20 @@ class RobotPointCloudFK:
             max_points: upper bound of points after downsample (None=no downsample). Fixed seed +
                         per-link stratified, so collect/deploy select identical points given the
                         same npz and max_points.
+            link_filter: tuple of link-name PREFIXES to keep (e.g. HAND_LINK_PREFIXES), or None for
+                        every link. Applied BEFORE the downsample, so max_points is spent entirely
+                        on the surviving links -- filtering to the hand does not shrink the cloud,
+                        it re-spends the same budget at higher density on the hand.
+            per_link_points: exact per-link quota for every kept link except `fill_link`, which
+                        absorbs whatever is left of max_points. None = the proportional stratified
+                        downsample instead.
+                        WARNING: the canonical npz has a hard per-link ceiling (the offline mesh
+                        sampling decided it), and for the Inspire hand only R_thumb_proximal has 50+
+                        points -- the five R_*_tip links have 6. A quota above the ceiling is met by
+                        sampling WITH REPLACEMENT, i.e. duplicate coordinates that add no geometry
+                        and only consume budget. Raise the density in
+                        tools/build_robot_pointcloud.py if genuinely more finger detail is wanted.
+            fill_link:  link that receives max_points minus the sum of the quotas.
         """
         data = np.load(npz_path, allow_pickle=True)
         points = data["points"].astype(np.float32)        # (M0,3) each in its link frame
@@ -107,22 +131,73 @@ class RobotPointCloudFK:
         keep = np.ones(len(points), dtype=bool)
         pt_body = np.zeros(len(points), dtype=np.int64)
         missing = {}
+        excluded = {}
         for li, lname in enumerate(link_names):
             mask = link_idx == li
             bi = name_to_body.get(lname, None)
             if bi is None:
                 missing[lname] = int(mask.sum())
                 keep[mask] = False
+            elif link_filter is not None and not lname.startswith(tuple(link_filter)):
+                excluded[lname] = int(mask.sum())
+                keep[mask] = False
             else:
                 pt_body[mask] = bi
 
         pts = points[keep]
         pb = pt_body[keep]
+        if len(pts) == 0:
+            raise ValueError(f"link_filter={link_filter} matched no link in {npz_path}; "
+                             f"available links: {link_names}")
+        self.link_filter = tuple(link_filter) if link_filter is not None else None
+        self.kept_link_names = [n for n in link_names
+                                if n in name_to_body and (link_filter is None
+                                                          or n.startswith(tuple(link_filter)))]
+
+        # exact per-link quota: every kept link gets `per_link_points`, `fill_link` takes the rest.
+        # Same fixed seed as the stratified path, so collect and deploy still select identical
+        # points (including identical duplicates when a quota exceeds the link's ceiling).
+        self.oversampled = {}
+        if per_link_points is not None:
+            if max_points is None:
+                raise ValueError("per_link_points requires max_points (the total budget)")
+            q, tgt = int(per_link_points), int(max_points)
+            rs = np.random.RandomState(20240601)
+            fill_bi = name_to_body.get(fill_link, None)
+            body_to_name = {i: n for n, i in name_to_body.items()}
+            sel_chunks, quota_total = [], 0
+            for bi in np.unique(pb):
+                if bi == fill_bi:
+                    continue
+                idx_b = np.where(pb == bi)[0]
+                if len(idx_b) >= q:
+                    pick = idx_b[rs.permutation(len(idx_b))[:q]]
+                else:   # quota above this link's ceiling -> duplicate (see the warning in the docstring)
+                    pick = np.concatenate([idx_b, idx_b[rs.randint(0, len(idx_b), q - len(idx_b))]])
+                    self.oversampled[body_to_name.get(bi, bi)] = (len(idx_b), q)
+                sel_chunks.append(pick)
+                quota_total += q
+            rem = tgt - quota_total
+            if rem < 0:
+                raise ValueError(
+                    f"per_link_points={q} x {len(sel_chunks)} links = {quota_total} exceeds "
+                    f"max_points={tgt}; nothing left for '{fill_link}'. Raise max_points to at "
+                    f"least {quota_total + 1} or lower per_link_points.")
+            if fill_bi is not None and rem > 0:
+                idx_f = np.where(pb == fill_bi)[0]
+                if len(idx_f) >= rem:
+                    sel_chunks.append(idx_f[rs.permutation(len(idx_f))[:rem]])
+                else:
+                    sel_chunks.append(np.concatenate(
+                        [idx_f, idx_f[rs.randint(0, len(idx_f), rem - len(idx_f))]]))
+                    self.oversampled[fill_link] = (len(idx_f), rem)
+            sel = np.sort(np.concatenate(sel_chunks))
+            pts, pb = pts[sel], pb[sel]
 
         # deterministic stratified downsample: per-link quota (at least 1 point per link), so small
         # links (fingertips) are not emptied. Fixed seed -> collect/deploy identical points given the
         # same npz + max_points.
-        if max_points is not None and int(max_points) < len(pts):
+        elif max_points is not None and int(max_points) < len(pts):
             tgt = int(max_points)
             M0 = len(pts)
             rs = np.random.RandomState(20240601)
@@ -154,6 +229,16 @@ class RobotPointCloudFK:
                   f"merged links)")
             if missing:
                 print(f"    dropped links (not live bodies): {missing}")
+            # printed loudly: the filter does not change the point count, so a collect/deploy
+            # mismatch is invisible in the zarr shape and would silently feed the policy a
+            # differently-shaped robot segment than it was trained on.
+            print(f"    link_filter = {self.link_filter}"
+                  f"  -> {len(self.kept_link_names)} links: {self.kept_link_names}")
+            if excluded:
+                print(f"    EXCLUDED by link_filter: {excluded}")
+            if self.oversampled:
+                print(f"    OVERSAMPLED (duplicate points, no new geometry) "
+                      f"{{link: (npz has, quota)}}: {self.oversampled}")
 
     @torch.no_grad()
     def __call__(self, body_pos_w: torch.Tensor, body_quat_w: torch.Tensor,

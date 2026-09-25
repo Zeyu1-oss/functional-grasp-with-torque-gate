@@ -14,6 +14,15 @@ API:
   p = install_direct_drive(env_unwrapped)            # monkeypatch, returns DriveParams
   env_unwrapped._direct_target = q_star              # deploy: DP3's q*
   env_unwrapped._direct_target = raw_to_target(a, cur0, p)   # collect/play: raw->q*
+
+Optional torque feedforward (deploy only, off unless set):
+  env_unwrapped._direct_torque_ff = tau_ff           # (num_envs, 13) Nm, or None/unset = no-op
+Applied via Articulation.set_joint_effort_target on the SAME controlled joints, every substep,
+alongside the position target. For an ImplicitActuator this does not replace the PD term -- PhysX
+computes `stiffness*pos_error + damping*vel_error + joint_effort_target` and clips to the effort
+limit (isaaclab ActuatorBase._clip_effort; see actuator_pd.py's ImplicitActuator.compute) -- so a
+predicted torque here is a feedforward ADDED on top of ordinary position tracking, not a
+replacement for it. Left unset, behavior is byte-identical to before this attribute existed.
 """
 import types
 
@@ -60,41 +69,6 @@ def raw_to_target(a, cur0, p):
         cur[:, na:] = cur[:, na:] + a[:, na:] * mfd
         cur = torch.max(torch.min(cur, p.ju.unsqueeze(0)), p.jl.unsqueeze(0))
     return cur
-
-
-def smooth_labels_forward(actions, k: int):
-    """Forward moving average of action labels: new_a[t] = mean(a[t : t+k])
-    (window shrinks automatically at the episode tail).
-
-    Why needed: the teacher's (RL) cur_targets is rate-limit-saturated PWM jitter
-    (each step +/-max_joint_delta, near-random sign flips; measured 95% of steps hit the 0.02
-    limit, ~43% flip rate). For BC this is unpredictable label noise: the error floor ~ jitter
-    amplitude, diluting the learning signal ~7x. Forward mean averages out the zero-mean jitter
-    (k=8 -> residual ~0.02/sqrt(8) ~ 0.007 rad), while:
-      - the DC bias for grip force / anti-gravity (target deeper than measured position) is fully kept;
-      - after smoothing the per-step delta |d| <= original rate-limit envelope (mean of diffs <= diff
-        of means), directly executable at deploy;
-      - the forward window carries ~(k-1)/2 steps of lead: for old-gen data (action shifted one row)
-        it conveniently cancels the "label one step late"; for new-gen official-timing data
-        (collect from 2026-07-16) it is pure lead, so deploy lag_comp should be 0 and beware that a
-        too-large k makes the action run ahead of the observation.
-
-    Single source: collect_dp3_data.py (smooth at collection time) and
-    tools/relabel_smooth_actions.py (offline relabel) both use this function, byte-for-byte identical.
-
-    actions: (T, D) numpy array; returned unchanged when k<=1.
-    """
-    import numpy as np
-    actions = np.asarray(actions)
-    T = len(actions)
-    if k <= 1 or T == 0:
-        return actions.astype(np.float32, copy=False)
-    cs = np.concatenate([np.zeros((1, actions.shape[1]), dtype=np.float64),
-                         np.cumsum(actions.astype(np.float64), axis=0)], axis=0)
-    hi = np.minimum(np.arange(T) + k, T)
-    lo = np.arange(T)
-    out = (cs[hi] - cs[lo]) / (hi - lo)[:, None]
-    return out.astype(np.float32)
 
 
 def install_direct_drive(env_unwrapped, rate_limit: bool = False):
@@ -144,7 +118,14 @@ def install_direct_drive(env_unwrapped, rate_limit: bool = False):
         tgt = torch.max(torch.min(tgt, ju.unsqueeze(0)), jl.unsqueeze(0))
         self.cur_targets = tgt
         self.franka.set_joint_position_target(tgt, joint_ids=self.controlled_joint_indices)
+        # optional torque feedforward -- see module docstring. Unset (None, the default set
+        # below) is a genuine no-op: this branch never runs and nothing about position-only
+        # control changes relative to before this attribute existed.
+        ff = getattr(self, "_direct_torque_ff", None)
+        if ff is not None:
+            self.franka.set_joint_effort_target(ff, joint_ids=self.controlled_joint_indices)
 
     env_unwrapped._apply_action = types.MethodType(_apply_action_direct, env_unwrapped)
     env_unwrapped._direct_target = env_unwrapped.cur_targets.clone()   # placeholder, legal value before first step
+    env_unwrapped._direct_torque_ff = None   # opt-in: deploy sets this per-step to enable feedforward
     return p
