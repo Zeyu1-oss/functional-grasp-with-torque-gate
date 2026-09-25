@@ -63,7 +63,7 @@ cd .. && git clone -b dp3 https://github.com/Zeyu1-oss/functional-grasp-with-tor
 tasks/          Isaac Lab envs (GraspDrillEnv -> Stage2Env -> ChainedEnv), reward/termination terms
 scripts/        Entry points — train / play / collect / deploy (the pipeline below)
 perception/     Point-cloud & observation code, shared by collect and deploy
-config/         Scene, drill-variant, and RL-games/DP3 agent YAMLs
+config/         Scene, drill-variant, and RL-games/DP3 agent YAMLs — see docs/ADDING_OBJECTS.md
 tools/          Asset prep, eval poses, analysis and plotting — outside the repro path
 results/        Plots and tables assembled from runs/
 assets/ data/ collected_data/ runs/ output/   Generated — gitignored
@@ -155,29 +155,6 @@ transfer. Regressing them from the point cloud is the obvious next step.
   <img src="docs/img/unseen_failure.png" width="38%" alt="Unseen drill: handle enclosed but the index finger misses the trigger">
   <img src="docs/img/stage2_alignment.png" width="52%" alt="Stage 2: the grasped drill aligned against the target plate">
 </p>
-
----
-
-## Adding a new object
-
-Three steps of asset prep, then one entry in `config/drill_variants.yaml`:
-
-```bash
-python tools/convert_usdz.py assets/spray/spray1.usdz          # .usdz -> .usd, if needed
-python tools/normalize_asset.py assets/spray/spray1.usd --grip_diameter 0.045
-python tools/add_physics_apis.py assets/spray/spray1.usd       # RigidBody / Mass / Collision APIs
-```
-
-`normalize_asset.py` bakes metres, origin and size into the file, so the yaml keeps
-`scale: [1,1,1]` and keypoints can be read straight off the geometry. `add_physics_apis.py`
-defaults to `convexDecomposition` — a convex hull would fill in the trigger recess and make it
-unreachable. Each script's docstring explains the failure it prevents.
-
-Only `name` and `usd_path` are required in the yaml; `variant_index` is a fixed global index that
-existing checkpoints depend on, so never renumber one. The annotation that matters is
-`trigger_offset` (and `thumb_target_local`, `forward_axis`, `body_mask_*`) — see the commented-out
-spray-bottle entries in `drill_variants.yaml`, which double as templates for non-drill objects and
-show the extra fields those need (`trigger_link`, `min_contact_links`, `body_mesh_keywords`).
 
 ---
 
