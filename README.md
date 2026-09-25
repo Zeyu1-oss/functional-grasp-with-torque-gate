@@ -24,7 +24,7 @@ pip install diffusers==0.36 zarr==2.16.1 numcodecs==0.12.1 hydra-core==1.3.2 ome
 ```
 
 Upstream's [INSTALL.md](INSTALL.md) additionally installs MuJoCo, mujoco-py, and the Adroit / DexArt /
-MetaWorld benchmark suites. **None of that is needed here** — those envs are removed from `env/__init__.py`,
+MetaWorld benchmark suites. **None of that is needed here** — those envs are deleted on this branch,
 evaluation happens in Isaac Lab, and `pytorch3d` is not imported by the policy this branch trains. Its pinned
 versions (diffusers 0.11, zarr 2.12, hydra 1.2) are also older than what this branch runs on.
 
@@ -59,9 +59,9 @@ The remaining `train_policy_inspire_drill_*.sh` scripts train on differently com
 (`cam1_2048_force`), a denser or hand-only robot segment (`handpc1280`, `handonly`), or both stages chained
 (`chained`) — and each needs a zarr collected to match.
 
-> `scripts/` also still holds upstream's entry points — `train_policy.sh`, `eval_policy.sh`,
-> `gen_demonstration_*.sh`, `convert_real_robot_data.py` — and the repo root holds `eval.py`. They drive the
-> benchmark envs this branch removed and will not run here. Use the script above, and evaluate in Isaac Lab.
+> Upstream's own entry points (`train_policy.sh`, `eval_policy.sh`, `gen_demonstration_*.sh`, `eval.py`) are
+> deleted on this branch along with the benchmark envs they drove. Train with the script above; evaluate in
+> Isaac Lab.
 
 ---
 
