@@ -161,8 +161,7 @@ condition often fails — trigger offsets are specified per variant in the objec
 transfer. Regressing them from the point cloud is the obvious next step.
 
 <p align="center">
-  <img src="docs/img/unseen_failure.png" width="38%" alt="Unseen drill: handle enclosed but the index finger misses the trigger">
-  <img src="docs/img/stage2_alignment.png" width="52%" alt="Stage 2: the grasped drill aligned against the target plate">
+  <img src="docs/img/stage2_alignment.png" width="62%" alt="Stage 2: the grasped drill aligned against the target plate">
 </p>
 
 ---
