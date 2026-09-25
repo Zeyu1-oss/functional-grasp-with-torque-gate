@@ -63,11 +63,15 @@ cd .. && git clone -b dp3 https://github.com/Zeyu1-oss/functional-grasp-with-tor
 tasks/          Isaac Lab envs (GraspDrillEnv -> Stage2Env -> ChainedEnv), reward/termination terms
 scripts/        Entry points — train / play / collect / deploy (the pipeline below)
 perception/     Point-cloud & observation code, shared by collect and deploy
-config/         Scene, drill-variant, and RL-games/DP3 agent YAMLs — see docs/ADDING_OBJECTS.md
+config/         Scene, drill-variant, and RL-games/DP3 agent YAMLs
 tools/          Asset prep, eval poses, analysis and plotting — outside the repro path
 results/        Plots and tables assembled from runs/
 assets/ data/ collected_data/ runs/ output/   Generated — gitignored
 ```
+
+To grasp a tool other than the three drills shipped here, see
+**[docs/ADDING_OBJECTS.md](docs/ADDING_OBJECTS.md)** — asset preparation and the variant fields
+that have to be annotated per object.
 
 ---
 
