@@ -15,8 +15,18 @@ pipeline; this one only records what changed on the DP3 side.
 
 ## Installation
 
-Dependencies are unchanged from upstream — follow [INSTALL.md](INSTALL.md). Developed against Python 3.8,
-torch 2.4.1 (cu124), diffusers 0.36, zarr 2.16, hydra 1.3.2.
+```bash
+conda create -n dp3 python=3.8 && conda activate dp3
+pip install torch==2.4.1 torchvision --index-url https://download.pytorch.org/whl/cu124
+cd 3D-Diffusion-Policy && pip install -e . && cd ..
+pip install diffusers==0.36 zarr==2.16.1 numcodecs==0.12.1 hydra-core==1.3.2 omegaconf dill einops \
+            numba "numpy<1.25" scipy matplotlib plotly wandb termcolor
+```
+
+Upstream's [INSTALL.md](INSTALL.md) additionally installs MuJoCo, mujoco-py, and the Adroit / DexArt /
+MetaWorld benchmark suites. **None of that is needed here** — those envs are removed from `env/__init__.py`,
+evaluation happens in Isaac Lab, and `pytorch3d` is not imported by the policy this branch trains. Its pinned
+versions (diffusers 0.11, zarr 2.12, hydra 1.2) are also older than what this branch runs on.
 
 Two things the training scripts hardcode and that you will have to adjust:
 
