@@ -55,6 +55,13 @@ since the gate is supervised from it. Everything else defaults to the reported c
 
 The other `train_policy_inspire_drill_grasp_norobot_*.sh` scripts are the ablation cells. Each `exec`s the
 same base script with one switch flipped rather than copying it, so the pipeline cannot drift between cells.
+The remaining `train_policy_inspire_drill_*.sh` scripts train on differently composed data — camera-only
+(`cam1_2048_force`), a denser or hand-only robot segment (`handpc1280`, `handonly`), or both stages chained
+(`chained`) — and each needs a zarr collected to match.
+
+> `scripts/` also still holds upstream's entry points — `train_policy.sh`, `eval_policy.sh`,
+> `gen_demonstration_*.sh`, `convert_real_robot_data.py` — and the repo root holds `eval.py`. They drive the
+> benchmark envs this branch removed and will not run here. Use the script above, and evaluate in Isaac Lab.
 
 ---
 
