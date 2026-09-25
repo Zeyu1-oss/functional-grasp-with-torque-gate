@@ -101,17 +101,17 @@ cd ../3D-Diffusion-Policy && bash scripts/train_policy_inspire_drill_grasp_norob
     ../functional-grasp-with-torque-gate/data/norobot.zarr
 cd ../functional-grasp-with-torque-gate
 
-# 5. Draw a fixed evaluation pose set, then deploy and grade the checkpoint from step 4
-python tools/make_sobol_init_poses.py -n 100 -o data/eval_sobol_100.npz   # -n is per variant -> 300
-python scripts/deploy_dp3_sim.py --stage1_only --headless --num_envs 70 \
-    --disable_cam2 --no_robot --init_pose_file data/eval_sobol_100.npz \
+# 5. Deploy and grade the checkpoint from step 4
+python scripts/deploy_dp3_sim.py --stage1_only --headless --num_envs 70 --disable_cam2 --no_robot \
     --dp3_ckpt ../3D-Diffusion-Policy/3D-Diffusion-Policy/data/outputs/<run>/checkpoints/epoch_0180.ckpt
 ```
 
-`--init_pose_file` replays a fixed pose set, each pose once, so checkpoints are graded on identical
-initial conditions — drawn independently of any policy, not reused from the teacher's successes.
-Other deploy modes: `--stage2_rl` (DP3 grasps, teacher aligns), `--stage2_dp3_ckpt` (both stages
-distilled), `--dump_gate` (log the gate against ground-truth contact), `--policy rl`.
+To compare checkpoints, add `--init_pose_file`: it replays a fixed pose set, each pose once, so every
+checkpoint is graded on identical initial conditions. Generate one with
+`tools/make_sobol_init_poses.py -n 100` (per variant, so 300 total) — drawn independently of any
+policy, rather than reused from the teacher's successes. Other deploy modes: `--stage2_rl` (DP3
+grasps, teacher aligns), `--stage2_dp3_ckpt` (both stages distilled), `--dump_gate` (log the gate
+against ground-truth contact), `--policy rl`.
 
 > **Collect and deploy must agree.** Both build the observation from the same `perception/` code,
 > but its composition is chosen by flags (`--disable_cam2`, `--no_robot`, `--force_state`, …). A
