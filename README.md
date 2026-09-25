@@ -77,10 +77,17 @@ that have to be annotated per object.
 
 ## Usage
 
-<p align="center"><img src="docs/img/pipeline.png" width="88%" alt="Teacher/student pipeline: PPO teacher rollout producing demonstrations (a), and the student's point-cloud/joint/torque encoders, contact gate, and diffusion head consuming them (b)"></p>
+<p align="center"><img src="docs/img/pipelinev1.png" width="88%" alt="Teacher/student pipeline: (a) VLM-assisted functional targets and a 74-d privileged state drive a PPO teacher whose Isaac Lab rollouts are recorded as demonstrations; (b) the student encodes a two-frame point cloud, joint positions and torques, mixes the torque feature through a contact-supervised gate, and denoises actions plus an auxiliary torque sequence"></p>
 
-PPO teacher training is two stages — grasp, then align. Everything runs in this branch's Isaac Lab
-env **except step 4**, which switches to the `dp3` checkout and its own env.
+**(a)** The teacher is a single PPO stage — no curriculum — trained on a 74-d privileged state
+against functional targets annotated in the object frame; one episode reorients the tool, grasps
+it, and reaches the trigger. A second, separate teacher (`train2.py`) learns screw-hole alignment,
+warm-started from grasp end-states rather than continuing the first. **(b)** The student is
+distilled offline and sees only point cloud, joint positions and joint torque; the annotations and
+contact labels are training signal and never enter its input.
+
+Everything runs in this branch's Isaac Lab env **except step 4**, which switches to the `dp3`
+checkout and its own env.
 
 ```bash
 # 1. Stage-1 teacher: grasp (PPO)
@@ -135,8 +142,8 @@ In simulation, on 300 unseen initial poses shared by every checkpoint. Success r
 
 | Policy | Observation | Success |
 |---|---|---|
-| Stage-1 teacher (grasp) | privileged state (75-d) | 93.0 % |
-| Stage-2 teacher (align) | privileged state + plate pose | 92.0 % |
+| Grasp teacher | privileged state (74-d) | 93.0 % |
+| Alignment teacher | privileged state + plate pose | 92.0 % |
 | Grasp **student** (ours) | point cloud + proprioception | **79.7 %** |
 
 ### Torque ablation
