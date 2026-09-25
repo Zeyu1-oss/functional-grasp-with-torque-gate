@@ -1,7 +1,14 @@
-cat >> .gitignore << 'EOF'
+# Generated / large data — not source
 runs/
 data/
 output/
 collected_data/
 assets/
-EOF
+log/
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# Editor / tool debris
+.cursor/
