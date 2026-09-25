@@ -121,6 +121,11 @@ against ground-truth contact), `--policy rl`.
 > but its composition is chosen by flags (`--disable_cam2`, `--no_robot`, `--force_state`, …). A
 > mismatch is silent — only the point-cloud *size* is checked against the checkpoint at startup.
 
+The tables and figures below are produced from these runs by `tools/`: `sweep_eval.py` grades every
+checkpoint of a run into a CSV, `analyze_gate.py` and `plot_*.py` turn `--dump_gate` / `--dump_torque`
+dumps into the plots. `tools/isaac_python.sh` joins the conda env with Isaac Sim's kit bindings, if
+your shell doesn't already.
+
 ---
 
 ## Results
