@@ -158,6 +158,29 @@ transfer. Regressing them from the point cloud is the obvious next step.
 
 ---
 
+## Adding a new object
+
+Three steps of asset prep, then one entry in `config/drill_variants.yaml`:
+
+```bash
+python tools/convert_usdz.py assets/spray/spray1.usdz          # .usdz -> .usd, if needed
+python tools/normalize_asset.py assets/spray/spray1.usd --grip_diameter 0.045
+python tools/add_physics_apis.py assets/spray/spray1.usd       # RigidBody / Mass / Collision APIs
+```
+
+`normalize_asset.py` bakes metres, origin and size into the file, so the yaml keeps
+`scale: [1,1,1]` and keypoints can be read straight off the geometry. `add_physics_apis.py`
+defaults to `convexDecomposition` — a convex hull would fill in the trigger recess and make it
+unreachable. Each script's docstring explains the failure it prevents.
+
+Only `name` and `usd_path` are required in the yaml; `variant_index` is a fixed global index that
+existing checkpoints depend on, so never renumber one. The annotation that matters is
+`trigger_offset` (and `thumb_target_local`, `forward_axis`, `body_mask_*`) — see the commented-out
+spray-bottle entries in `drill_variants.yaml`, which double as templates for non-drill objects and
+show the extra fields those need (`trigger_link`, `min_contact_links`, `body_mesh_keywords`).
+
+---
+
 ## References
 
 - Ze et al., **3D Diffusion Policy**, RSS 2024 — the student architecture
