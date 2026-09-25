@@ -70,7 +70,8 @@ perception/     Point-cloud & observation code, shared by collect and deploy
 config/         Scene, drill-variant, and RL-games/DP3 agent YAMLs
 tools/          Asset prep, eval poses, analysis and plotting — outside the repro path
 results/        Plots and tables assembled from runs/
-assets/ data/ collected_data/ runs/ output/   Generated — gitignored
+data/           Generated, gitignored — except the committed evaluation pose set
+assets/ collected_data/ runs/ output/         Generated — gitignored
 ```
 
 To grasp a tool other than the three drills shipped here, see
@@ -127,10 +128,11 @@ python scripts/deploy_dp3_sim.py --stage1_only --headless --num_envs 70 --disabl
     --dp3_ckpt ../3D-Diffusion-Policy/3D-Diffusion-Policy/data/outputs/<run>/checkpoints/epoch_0180.ckpt
 ```
 
-To compare checkpoints, add `--init_pose_file`: it replays a fixed pose set, each pose once, so every
-checkpoint is graded on identical initial conditions. Generate one with
-`tools/make_sobol_init_poses.py -n 100` (per variant, so 300 total) — drawn independently of any
-policy, rather than reused from the teacher's successes. Other deploy modes: `--stage2_rl` (DP3
+Deploy grades against a fixed pose set by default: `--init_pose_file data/eval_sobol_100_pos010.npz`
+is committed, so the 300 poses behind the numbers below (100 per variant, each run exactly once) are
+the same for every checkpoint. They come from a Sobol sequence drawn independently of any policy,
+rather than reused from the teacher's successes; `tools/make_sobol_init_poses.py -n 100` draws
+another set. Other deploy modes: `--stage2_rl` (DP3
 grasps, teacher aligns), `--stage2_dp3_ckpt` (both stages distilled), `--dump_gate` (log the gate
 against ground-truth contact), `--policy rl`.
 

@@ -1,6 +1,8 @@
 # Generated / large data — not source
 runs/
-data/
+data/*
+# ...except the shared evaluation pose set, which deploy loads by default
+!data/eval_sobol_100_pos010.npz
 output/
 collected_data/
 assets/
