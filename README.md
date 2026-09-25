@@ -50,8 +50,12 @@ gdown --fuzzy 'https://drive.google.com/file/d/1PdrOZZjNwIF0OrMTwvL6x9sda6tw_FAN
 unzip assets.zip -d assets/
 python tools/build_robot_pointcloud.py     # -> assets/inspire_tac/robot_canonical_points.npz
 
-# 4. The dp3 branch, in its own directory — only needed for step 4 of the pipeline below.
-#    See its README for what it adds on top of upstream DP3, and INSTALL.md for setup.
+# 4. The trained DP3 student, if you only want to run it — this alone is enough for step 5 below,
+#    and lets you skip teacher training, data collection and student training entirely
+gdown --fuzzy 'https://drive.google.com/file/d/19svkGp74ZOuaX3Tyom0twH36VG3Tywde/view?usp=drive_link' -O dp3_student.ckpt
+
+# 5. The dp3 branch, in its own directory — only needed to TRAIN a student (step 4 of the pipeline
+#    below). Skip it if you downloaded the checkpoint above.
 cd .. && git clone -b dp3 https://github.com/Zeyu1-oss/functional-grasp-with-torque-gate.git 3D-Diffusion-Policy
 ```
 
@@ -87,7 +91,8 @@ distilled offline and sees only point cloud, joint positions and joint torque; t
 contact labels are training signal and never enter its input.
 
 Everything runs in this branch's Isaac Lab env **except step 4**, which switches to the `dp3`
-checkout and its own env.
+checkout and its own env. **To just run the trained policy, download the checkpoint (Installation
+step 4) and go straight to step 5** — steps 1–4 reproduce it from scratch.
 
 ```bash
 # 1. Stage-1 teacher: grasp (PPO)
@@ -112,7 +117,12 @@ cd ../3D-Diffusion-Policy && bash scripts/train_policy_inspire_drill_grasp_norob
     ../functional-grasp-with-torque-gate/data/norobot.zarr
 cd ../functional-grasp-with-torque-gate
 
-# 5. Deploy and grade the checkpoint from step 4
+# 5. Deploy and grade a student. The downloaded checkpoint (Installation step 4) runs as-is —
+#    it was trained with exactly these flags, so steps 1-4 above are not needed to run it.
+python scripts/deploy_dp3_sim.py --stage1_only --headless --num_envs 70 --disable_cam2 --no_robot \
+    --dp3_ckpt dp3_student.ckpt
+
+# ...or a checkpoint you trained yourself in step 4, same flags as the collection in step 3
 python scripts/deploy_dp3_sim.py --stage1_only --headless --num_envs 70 --disable_cam2 --no_robot \
     --dp3_ckpt ../3D-Diffusion-Policy/3D-Diffusion-Policy/data/outputs/<run>/checkpoints/epoch_0180.ckpt
 ```
